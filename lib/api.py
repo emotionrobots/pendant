@@ -9,7 +9,7 @@
 #
 #  Copyright (c) 2020-2021, E-Motion, Inc.  All Rights Researcved
 #
-#  License: MIT 
+#  License: Proprietary
 #
 #  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 #  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -21,6 +21,7 @@
 #
 #=============================================================================
 import sys, getopt
+import time
 import requests
 import json
 import random
@@ -229,7 +230,7 @@ class ViroGuardApi():
   #
   #  addMembership(self, uid, org, role, accepted=False)      
   #    uid - userid
-  #    org - org
+  #    org - orgId
   #    role - 'm' (member), 'a' (admin), or 'o' (owner)
   #
   #  return "Success" 
@@ -274,10 +275,10 @@ class ViroGuardApi():
   #  send an email to the user inviting them to join ViroGuard.
   #
   #---------------------------------------------------------------
-  def inviteMember(self, org, email, role='m'):
+  def inviteMember(self, orgId, email, role='m'):
     endpt = "/inviteMember"
     req = {
-      "org": org,
+      "orgID": orgId,
       "targetEmail": email,
       "role": role,
     }
@@ -311,9 +312,9 @@ class ViroGuardApi():
       
   #---------------------------------------------------------------
   #
-  #  delMembership(self, uid, org)
+  #  delMembership(self, uid, orgId)
   #    uid - userid
-  #    org - organization
+  #    org - organization ID
   # 
   #    return "Success"
   #
@@ -324,11 +325,11 @@ class ViroGuardApi():
   #  request to join an organization.
   #
   #---------------------------------------------------------------
-  def delMembership(self, uid, org):
+  def delMembership(self, uid, orgId):
     endpt = "/deleteMembership"
     req = {
       "uid": uid,
-      "org": org 
+      "org": orgId 
     }
     res = requests.post( self.baseURL + endpt, data=json.dumps(req), 
                        verify=self.certificate)
@@ -421,17 +422,11 @@ class ViroGuardApi():
   #
   #  createOrganization(self, name)
   #    name - organiation name
-  #    ... - ?  what are the other attributes?
   #
   #  return orgId           
   #
   #  This endpoint is used to create an organization. The request 
-  #  only requires a name to be given, however additional information 
-  #  about the organization can be sent as well. The complete process 
-  #  of a user creating an organization additionally includes calling 
-  #  the /addMembership endpoint to add the user who created the 
-  #  organization as the owner using the ID of the organization that 
-  #  is returned. 
+  #  only requires a name to be given.
   #
   #---------------------------------------------------------------
   def createOrganization(self, name):
@@ -562,10 +557,14 @@ class UnitTest(unittest.TestCase):
       orgId = orgs[0]["orgID"]
     self.assertEqual(res.status_code==200 and orgId != -1, True)
     print("Passed /getOrganizations")
-      
+
+  
     #-------------
+    #  Register two users with two randomly generated UID: uid and uid2
+
     print("Testing /registerUser")
-    uid = random.randint(0, 10000000)
+
+    uid = str(random.randint(0, 10000000))
     res =  self.api.registerUser(
       uid = uid, 
       name = "Flash Gordon", 
@@ -573,7 +572,8 @@ class UnitTest(unittest.TestCase):
       phone = "+11234567890", 
       email = "emotionrobots@gmail.com"
     )
-    uid2= random.randint(0, 10000000)
+
+    uid2= str(random.randint(0, 10000000))
     res2=  self.api.registerUser(
       uid = uid2,
       name = "Flash Light Gordon",
@@ -581,13 +581,20 @@ class UnitTest(unittest.TestCase):
       phone = "+11234567891",
       email = "larrylisky@gmail.com"
     )
+
     self.assertEqual(res.status_code==200 and 
                      res.text=="Success" and
                      res2.status_code==200 and
                      res2.text=="Success" , True)
+
+    print(f"----- Registered uid={uid} and uid2={uid2}")
     print("Passed /registerUser")
 
+
+    '''    
     #-------------
+    #  Test /getUserInfo by getting uid's userInfo
+ 
     print("Testing /getUserInfo")
     res = self.api.getUserInfo(uid)
     r = json.loads(res.text)
@@ -596,8 +603,11 @@ class UnitTest(unittest.TestCase):
       True
     )
     print("Passed /getUserInfo")
+
     
     #-------------
+    #  Test /editUserInfo by changing uid's email address
+
     print("Testing /editUserInfo")
     res1 = self.api.editUserInfo(uid, [{"attribute":"email", "value":"good@email.com"}])
     res2 = self.api.getUserInfo(uid)
@@ -607,28 +617,231 @@ class UnitTest(unittest.TestCase):
                      res1.text=="Success" and
                      r["email"]=="good@email.com", True)
     print("Passed /editUserInfo")
+
      
     #-------------
-    print("Testing /addCohabitant")
+    #  Test /addCohabitant by inviting uid2 (existing user) to become uid's cohabitant
+    #  Note: larrylisky@gmail.com is uid2's email address
+
+    print("Testing /addCohabitant (request)")
+
     res = self.api.addCohabitant(uid, "larrylisky@gmail.com")
-    print(f"res.status_code={res.status_code}, res.text={res.text}")
     self.assertEqual(res.status_code==200, True)
-    print("Passed /addCohabitant")
+    print("Passed /addCohabitant request")
 
 
     #-------------
-    print("Testing /xxx")
-    res2 = self.api.getUserInfo(uid)
-    print(f"res2.status_code={res2.status_code}, res2.text={res2.text}")
-    '''
-    r = json.loads(res2.text)
-    self.assertEqual(res1.status_code==200 and
+    #  Testing /addCohabitant readback 
+
+    print("Testing /addCohabitant readback ")
+    rc = input("----- Press ENTER when you accept the email invite at info@dashphone.ai")
+
+    res = self.api.getUserInfo(uid)
+    r = json.loads(res.text)
+
+    res2 = self.api.getUserInfo(uid2)
+    r2 = json.loads(res2.text)
+
+    cohab_found = False
+    cohab2_found = False
+ 
+    # See if uid2 is uid's cohabitant 
+    if r["cohabitants"] is not None:
+      cohab = json.loads(r["cohabitants"]) 
+      for personId in cohab:
+        if personId == uid2:
+          cohab_found = True
+
+    # See if uid is uid2's cohabitant 
+    if r2["cohabitants"] is not None:
+      cohab = json.loads(r2["cohabitants"]) 
+      for personId in cohab:
+        if personId == uid:
+          cohab2_found = True
+
+    self.assertEqual(res.status_code==200 and
+              cohab_found and cohab2_found, True)
+    print("Passed /addCohabitant readback ")
+
+
+
+    #-------------
+    #  Testing /deleteCohabitant (request)
+
+    print("Testing /deleteCohabitant (request) ")
+    print(f"----- Deleting cohabitant relationship between {uid} and {uid2}")
+
+    res = self.api.delCohabitant(uid, uid2)
+    self.assertEqual(res.status_code==200 and 
+                     res.text=="Success", True)
+    print("Passed /deleteCohabitant request")
+
+
+
+    #-------------
+    #  Testing /deleteCohabitant (readback) 
+
+    print("Testing /deleteCohabitant (readback) ")
+
+    res = self.api.getUserInfo(uid)
+    r = json.loads(res.text)
+
+    res2 = self.api.getUserInfo(uid2)
+    r2 = json.loads(res2.text)
+
+    cohab_found = False
+    cohab2_found = False
+ 
+    # See if uid2 is uid's cohabitant
+    if r["cohabitants"] is not None:
+      cohab = json.loads(r["cohabitants"])
+      for personId in cohab:
+        if personId == uid2:
+          cohab_found = True
+    if cohab_found:    
+      print(f"----- uid({uid}) still has uid2({uid2}) as cohabitant")
+
+    # See if uid is uid2's cohabitant
+    if r2["cohabitants"] is not None:
+      cohab = json.loads(r2["cohabitants"])
+      for personId in cohab:
+        if personId == uid:
+          cohab2_found = True
+    if cohab2_found:    
+      print(f"----- uid2({uid2}) still has uid({uid}) as cohabitant")
+
+    if (res.status_code != 200 or res2.status_code != 200):
+      print(f"----- res.status_code={res.status_code}, res2.status_code={res2.status_code}")
+
+    self.assertEqual(res.status_code==200 and 
                      res2.status_code==200 and
-                     res1.text=="Success" and
-                     r["cohabitants"][0]==
+                     cohab_found==False and
+                     cohab2_found==False, True)
+    print("Passed /deleteCohabitant readback")
+
     '''
 
 
+    #-------------
+    #  Testing /getSocialContacts
+
+    print("Testing /getSocialContacts")
+    res = self.api.getSocialContacts(
+      uid = uid
+    )
+    r = json.loads(res.text)
+    print(f"----- User {uid} has {len(r)} social contacts")
+    for contact in r:
+      print(f"---------- {contact}")
+    self.assertEqual(res.status_code==200, True)
+    print("Passed /getSocialContacts")
+
+
+
+    #-------------
+    #  Testing /getMetrics
+
+    print("Testing /getMetrics")
+    res = self.api.getMetrics(orgId)
+
+    if res.status_code == 200:
+      metrics = json.loads(res.text)
+      print(f"----- numReports   :{metrics['numReports']}")  
+      print(f"----- numInfections:{metrics['numInfections']}")  
+      print(f"----- numViolations:{metrics['numViolations']}")  
+       
+    self.assertEqual(res.status_code==200 and len(metrics)==3, True)
+    print("Passed /getMetrics")
+   
+
+
+    #-------------
+    #  Testing /createOrganization
+    
+    print("Testing /createOrganization")
+    res = self.api.createOrganization(name="Team Larry") 
+    orgId2 = res.text 
+    print(f"----- Created orgId2 = {orgId2}")
+    self.assertEqual(res.status_code==200, True) 
+    print("Passed /createOrganization")
+
+    
+
+    #-------------
+    #  Testing /addMembership
+
+    print("Testing /addMembership (request)")
+
+    res = self.api.addMembership(uid, orgId2, role='m', accepted=0) 
+    self.assertEqual(res.status_code==200 and
+                     res.text=="Success", True) 
+    print("Passed /addMembership (request)")
+    
+
+
+    #-------------
+    #  Testing /inviteMembership (request)
+     
+    print("Testing /inviteMembership (request)")
+    res = self.api.inviteMember(int(orgId2), email="larrylisky@gmail.com", role='m')
+
+    rc = 'n'
+    if res.status_code == 200:
+      rc = input(f"Did you get an invitation email from orgID={orgId2} with link: {res.text} (y/n)?")
+
+    self.assertEqual(res.status_code==200 and
+                     (rc == 'y' or rc== 'Y') , True) 
+    print("Passed /inviteMember (request)")
+
+
+
+    #-------------
+    #  Testing /inviteMembership (verify)
+    print("Testing /inviteMembership (verify)")
+
+    res = self.api.getUserInfo(uid)
+
+    foundMembership = None
+
+    r = json.loads(res.text)
+    if r['memberships'] is not None:
+      print(f"----- uid({uid}) has membership in:")
+      for membership in r['memberships']:
+        print(f"---------- orgID={membership['orgID']}")
+        if str(membership['orgID']) == orgId2:
+          print(f"---------- Found, accepted={membership['accepted']}")
+          foundMembership = membership
+   
+    self.assertEqual(res.status_code==200 and 
+                     foundMembership is not None, True)
+    print("Passed /inviteMembership (verify)")
+    
+
+    #-------------
+    #  Testing /acceptMembership
+    print("Testing /acceptMembership")
+
+    membershipId = foundMembership['membershipID']
+    res = self.api.acceptMembership(membershipId) 
+    self.assertEqual(res.status_code==200 and res.text=="Success", True) 
+    print("Passed /acceptMembership")
+
+    
+    #-------------
+    #  Testing /deleteMembership (request)
+    print("Testing /deleteMembership (request)")
+
+    res = self.api.delMembership(uid, orgId2) 
+    self.assertEqual(res.status_code==200 and res.text=="Success", True) 
+    print("Passed /deleteMembership (request)")
+
+    
+    #-------------
+    #-------------
+    #-------------
+    #-------------
+    #-------------
+    
 #===============================================================
 #
 #  Main()
